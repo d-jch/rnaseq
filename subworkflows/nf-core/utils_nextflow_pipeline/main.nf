@@ -88,27 +88,28 @@ def checkCondaChannels() {
     def parser = new org.yaml.snakeyaml.Yaml()
     def channels = []
     try {
-        def config
-        // 尝试 conda
-        def condaProcess = "conda config --show channels".execute()
-        condaProcess.waitFor()
-        if (condaProcess.exitValue() == 0) {
-            config = parser.load(condaProcess.text)
-        } 
-        // 如果 conda 失败，尝试 micromamba
-        else {
-            def mambaProcess = "micromamba config list channels".execute()
-            mambaProcess.waitFor()
-            if (mambaProcess.exitValue() == 0) {
-                config = parser.load(mambaProcess.text)
-            } else {
-                throw new IOException("Both conda and micromamba commands failed")
+        // Helper function to execute commands and parse output
+        def getChannels = { String cmd ->
+            try {
+                def process = cmd.execute()
+                process.waitForOrKill(10000) // 10 second timeout
+                if (process.exitValue() == 0) {
+                    return parser.load(process.text)?.channels
+                }
+                return null
+            } catch (Exception e) {
+                log.debug("Command failed: $cmd - ${e.message}")
+                return null
             }
         }
-        channels = config.channels
+        
+        // Try conda first, then micromamba
+        channels = getChannels("conda config --show channels") ?:
+                  getChannels("micromamba config list channels") ?:
+                  { throw new Exception("Both conda and micromamba commands failed") }()
     }
     catch (Exception e) {
-        log.warn("Could not verify conda channel configuration: ${e.message}")
+        log.warn("Could not verify conda channel configuration.")
         return null
     }
 
